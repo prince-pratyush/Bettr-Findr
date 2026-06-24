@@ -1,0 +1,22 @@
+# Better Findr — Phase 1 engine dependencies
+# Pinned to known-good major versions; refine as modules are implemented.
+
+# Text extraction
+pymupdf==1.24.10        # PDF parsing (fitz)
+python-docx==1.1.2      # .docx parsing
+
+# Local API (engine service, bound to 127.0.0.1)
+fastapi==0.115.0
+uvicorn==0.30.6
+
+# Ollama client for local embeddings (nomic-embed-text)
+ollama==0.3.3
+
+# Vector store: sqlite-vec extension for SQLite (FTS5 ships with SQLite)
+sqlite-vec==0.1.6
+
+# CLI ergonomics
+typer==0.12.5
+
+# Dev / tests
+pytest==8.3.3
