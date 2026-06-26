@@ -40,7 +40,11 @@ def _get_conn() -> sqlite3.Connection:
     global _conn
     if _conn is None:
         config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(config.DB_PATH))
+        # check_same_thread=False: the FastAPI engine serves sync routes from a
+        # threadpool, so the single cached connection is touched from worker
+        # threads. SQLite still serializes its own writes; this is a local,
+        # single-user engine with no concurrent writers.
+        conn = sqlite3.connect(str(config.DB_PATH), check_same_thread=False)
         conn.enable_load_extension(True)
         sqlite_vec.load(conn)
         conn.enable_load_extension(False)
