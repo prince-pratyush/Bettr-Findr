@@ -22,7 +22,7 @@ from typing import Optional
 import sqlite_vec
 
 from . import config
-from .models import Chunk, IndexStatus, QueryFilters, SearchResult
+from .models import Chunk, IndexStatus, ManifestEntry, QueryFilters, SearchResult
 
 # Over-fetch factor for filtered search: pull more candidates than `k` so that
 # post-filtering still leaves enough results.
@@ -171,6 +171,59 @@ def stats() -> IndexStatus:
         chunk_count=chunk_count,
         last_indexed_at=last_indexed,
     )
+
+
+# --- Manifest (drives incremental re-indexing) -------------------------------
+
+
+def get_manifest() -> dict[str, ManifestEntry]:
+    """Return all manifest entries keyed by file path."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT file_path, file_hash, modified_at, chunk_count, indexed_at "
+        "FROM manifest"
+    ).fetchall()
+    return {
+        r[0]: ManifestEntry(
+            file_path=r[0],
+            file_hash=r[1],
+            modified_at=r[2],
+            chunk_count=r[3],
+            indexed_at=r[4],
+        )
+        for r in rows
+    }
+
+
+def upsert_manifest(entry: ManifestEntry) -> None:
+    """Insert or update a single manifest entry."""
+    conn = _get_conn()
+    conn.execute(
+        """
+        INSERT INTO manifest (file_path, file_hash, modified_at, chunk_count, indexed_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(file_path) DO UPDATE SET
+            file_hash   = excluded.file_hash,
+            modified_at = excluded.modified_at,
+            chunk_count = excluded.chunk_count,
+            indexed_at  = excluded.indexed_at
+        """,
+        (
+            entry.file_path,
+            entry.file_hash,
+            entry.modified_at,
+            entry.chunk_count,
+            entry.indexed_at,
+        ),
+    )
+    conn.commit()
+
+
+def delete_manifest(path: str) -> None:
+    """Remove a manifest entry (its chunks are removed via ``delete_file``)."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM manifest WHERE file_path = ?", (path,))
+    conn.commit()
 
 
 # --- Reads -------------------------------------------------------------------

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from . import chunker, config, embedder, parser, store
-from .models import Chunk
+from .models import Chunk, ManifestEntry
 
 ProgressCallback = Callable[[float, str], None]
 
@@ -35,19 +35,24 @@ def index_folders(
     optional `progress` callback is invoked with ``(fraction, file_path)``.
     """
     files = _discover(paths)
-    total = len(files)
-    if total == 0:
-        return
+    manifest = store.get_manifest()
+    roots = [str(Path(p).expanduser()) for p in paths]
 
+    total = len(files)
     for i, path in enumerate(files, start=1):
         try:
-            _index_file(path)
+            current_hash = _hash_file(path)
+            entry = manifest.get(path)
+            if entry is None or entry.file_hash != current_hash:
+                _index_file(path, file_hash=current_hash)
         except embedder.EmbeddingError:
             raise  # a dead embedder is fatal for the whole run
         except Exception as exc:  # noqa: BLE001 — one bad file shouldn't abort
             logger.warning("Failed to index %s: %s", path, exc)
-        if progress is not None:
+        if progress is not None and total:
             progress(i / total, path)
+
+    _remove_deleted(manifest, set(files), roots)
 
 
 def _discover(paths: list[str]) -> list[str]:
@@ -71,7 +76,7 @@ def _is_supported(path: Path) -> bool:
     return path.suffix.lower().lstrip(".") in config.SUPPORTED_EXTENSIONS
 
 
-def _index_file(path: str) -> None:
+def _index_file(path: str, file_hash: str) -> None:
     text = parser.extract_text(path)
     if text is None:
         return
@@ -83,7 +88,6 @@ def _index_file(path: str) -> None:
     embeddings = embedder.embed(chunk_texts)
 
     p = Path(path)
-    file_hash = _hash_file(path)
     modified_at = datetime.fromtimestamp(os.path.getmtime(path)).isoformat()
     file_type = p.suffix.lower().lstrip(".")
 
@@ -105,6 +109,35 @@ def _index_file(path: str) -> None:
     # A re-index may produce fewer chunks than before; clear stale chunks first.
     store.delete_file(path)
     store.upsert_chunks(chunks)
+    store.upsert_manifest(
+        ManifestEntry(
+            file_path=path,
+            file_hash=file_hash,
+            modified_at=modified_at,
+            chunk_count=len(chunks),
+            indexed_at=datetime.now().isoformat(),
+        )
+    )
+
+
+def _remove_deleted(
+    manifest: dict[str, ManifestEntry], present: set[str], roots: list[str]
+) -> None:
+    """Drop indexed files that fall under `roots` but no longer exist on disk."""
+    for path in manifest:
+        if path in present:
+            continue
+        if _in_scope(path, roots) and not os.path.exists(path):
+            store.delete_file(path)
+            store.delete_manifest(path)
+
+
+def _in_scope(path: str, roots: list[str]) -> bool:
+    """True if `path` equals a root file or sits under a root directory."""
+    for root in roots:
+        if path == root or path.startswith(root + os.sep):
+            return True
+    return False
 
 
 def _hash_file(path: str, _bufsize: int = 1 << 20) -> str:
