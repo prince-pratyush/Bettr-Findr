@@ -17,6 +17,7 @@ sqlite-vec==0.1.6
 
 # CLI ergonomics
 typer==0.12.5
+click==8.1.8        # typer 0.12.5 predates click 8.2's make_metavar(ctx) change
 
 # Dev / tests
 pytest==8.3.3

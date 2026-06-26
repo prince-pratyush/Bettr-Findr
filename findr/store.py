@@ -22,7 +22,7 @@ from typing import Optional
 import sqlite_vec
 
 from . import config
-from .models import Chunk, QueryFilters, SearchResult
+from .models import Chunk, IndexStatus, QueryFilters, SearchResult
 
 # Over-fetch factor for filtered search: pull more candidates than `k` so that
 # post-filtering still leaves enough results.
@@ -156,6 +156,21 @@ def _delete_rowid(conn: sqlite3.Connection, rowid: int) -> None:
     conn.execute("DELETE FROM vec_chunks WHERE rowid = ?", (rowid,))
     conn.execute("DELETE FROM fts_chunks WHERE rowid = ?", (rowid,))
     conn.execute("DELETE FROM chunks WHERE id = ?", (rowid,))
+
+
+def stats() -> IndexStatus:
+    """Return a snapshot of index size and last-indexed time for `status`."""
+    conn = _get_conn()
+    file_count = conn.execute(
+        "SELECT COUNT(DISTINCT file_path) FROM chunks"
+    ).fetchone()[0]
+    chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    last_indexed = conn.execute("SELECT MAX(indexed_at) FROM manifest").fetchone()[0]
+    return IndexStatus(
+        file_count=file_count,
+        chunk_count=chunk_count,
+        last_indexed_at=last_indexed,
+    )
 
 
 # --- Reads -------------------------------------------------------------------
